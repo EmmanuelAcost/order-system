@@ -1,0 +1,103 @@
+services:
+  # ─────────────────────────────────────────
+  # Base de datos relacional — PostgreSQL
+  # ─────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: orders_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # Base de datos de documentos — MongoDB
+  # ─────────────────────────────────────────
+  mongodb:
+    image: mongo:7-jammy
+    container_name: audit_mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB}
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--eval', 'db.adminCommand("ping")']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # Microservicio 1 — Órdenes
+  # ─────────────────────────────────────────
+  orders-service:
+    build:
+      context: ./orders-service
+      dockerfile: Dockerfile
+    container_name: orders_service
+    restart: unless-stopped
+    ports:
+      - '3000:3000'   # HTTP REST
+      - '3001:3001'   # TCP para comunicación con audit-service
+    environment:
+      NODE_ENV: ${NODE_ENV}
+      PORT: ${ORDERS_PORT}
+      TCP_PORT: ${ORDERS_TCP_PORT}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      AUDIT_SERVICE_HOST: audit-service
+      AUDIT_SERVICE_TCP_PORT: ${AUDIT_TCP_PORT}
+      API_KEY: ${API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      audit-service:
+        condition: service_started
+    volumes:
+      - ./orders-service:/app
+      - /app/node_modules
+
+  # ─────────────────────────────────────────
+  # Microservicio 2 — Auditoría
+  # ─────────────────────────────────────────
+  audit-service:
+    build:
+      context: ./audit-service
+      dockerfile: Dockerfile
+    container_name: audit_service
+    restart: unless-stopped
+    ports:
+      - '3002:3002'   # HTTP REST
+      - '3003:3003'   # TCP para recibir eventos de orders-service
+    environment:
+      NODE_ENV: ${NODE_ENV}
+      PORT: ${AUDIT_PORT}
+      TCP_PORT: ${AUDIT_TCP_PORT}
+      MONGO_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongodb:27017/${MONGO_DB}?authSource=admin
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ./audit-service:/app
+      - /app/node_modules
+
+volumes:
+  postgres_data:
+  mongo_data:

@@ -1,0 +1,17 @@
+# Variables de entorno — nunca al repo
+.env
+
+# Dependencias
+node_modules/
+orders-service/node_modules/
+audit-service/node_modules/
+
+# Build
+orders-service/dist/
+audit-service/dist/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# OS
+.DS_Store
